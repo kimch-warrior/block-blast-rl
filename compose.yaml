@@ -1,0 +1,31 @@
+name: block-blast-local
+services:
+  block-blast:
+    image: block-blast-local:latest
+    build: .
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATA_DIR: /app/data
+      RL_WORKERS: "4"
+      RL_MAX_ENVS: "512"
+      RL_MAX_PENDING: "16"
+    ports:
+      - "127.0.0.1:5173:3000"
+    volumes:
+      - game-data:/app/data
+    networks:
+      - game-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 4s
+      retries: 3
+      start_period: 10s
+volumes:
+  game-data:
+    name: block-blast-data
+networks:
+  game-network:
+    name: block-blast-local

@@ -1,0 +1,18 @@
+{
+  "name": "block-blast-local",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "dev": "node --watch server/index.mjs",
+    "test": "node --test tests/engine.test.mjs tests/api.test.mjs tests/api-node.test.mjs tests/score-storage.test.mjs tests/rl-pool.test.mjs tests/rl-http.test.mjs tests/frontend-client.test.mjs tests/frontend-controller.test.mjs tests/frontend-input.test.mjs",
+    "rl:demo": "node examples/rl-client.mjs",
+    "rl:benchmark": "node scripts/benchmark-rl.mjs",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down"
+  }
+}

@@ -1,0 +1,16 @@
+node_modules
+.git
+dist
+.next
+.vinext
+.wrangler
+.sites-runtime
+.openai
+outputs
+coverage
+.env*
+.dev.vars*
+*.pem
+*.tsbuildinfo
+block-blast*.tar*
+data
