@@ -9,6 +9,8 @@ const errorIs = (status, code) => error => error.status === status && error.code
 const firstAction = result => result.actionMask.findIndex(Boolean);
 const actionsFor = session => session.results.map(result =>
   result.terminated || result.truncated ? null : firstAction(result));
+// Independent executions intentionally have different archival identities.
+const trajectory = results => results.map(({ gameId, ...result }) => result);
 
 test('pool configuration is bounded and workers start lazily', async t => {
   for (const config of [{ workerCount: 0 }, { workerCount: 17 }, { maxEnvs: 513 }, { maxEnvs: 0 }, { maxPending: 0 }]) {
@@ -94,7 +96,7 @@ test('seeded trajectories and resets are identical with one and four real worker
     one.create({ numEnvs: 12, seed: 1234, maxEpisodeSteps: 7 }),
     four.create({ numEnvs: 12, seed: 1234, maxEpisodeSteps: 7 }),
   ]);
-  assert.deepEqual(a.results, b.results);
+  assert.deepEqual(trajectory(a.results), trajectory(b.results));
   assert.equal(a.engineRulesVersion, 'reconstruction-v1');
   assert.equal(a.scoreRulesVersion, 2);
   assert.equal(a.invalidActionMode, 'reject');
@@ -110,7 +112,7 @@ test('seeded trajectories and resets are identical with one and four real worker
         one.reset(a.sessionId, { version: a.version, envIds: doneIds }),
         four.reset(b.sessionId, { version: b.version, envIds: doneIds }),
       ]);
-      assert.deepEqual(a.results, b.results);
+      assert.deepEqual(trajectory(a.results), trajectory(b.results));
     }
     const actions = actionsFor(a);
     const previous = a;
@@ -118,7 +120,7 @@ test('seeded trajectories and resets are identical with one and four real worker
       one.step(a.sessionId, { version: a.version, actions }),
       four.step(b.sessionId, { version: b.version, actions }),
     ]);
-    assert.deepEqual(a.results, b.results);
+    assert.deepEqual(trajectory(a.results), trajectory(b.results));
     for (let envId = 0; envId < a.numEnvs; envId++) {
       const result = a.results[envId];
       assert.equal(result.reward, result.observation.score - previous.results[envId].observation.score);
@@ -203,8 +205,9 @@ test('viewer snapshots before and during a training step never lock out mutation
   assert.equal(cached.version, session.version);
   const [again, viewed] = await Promise.all([second, during]);
   assert.equal(again.results[0].observation.moves, 2);
-  assert.equal(viewed.state.moves, 2);
-  assert.equal(viewed.version, again.results[0].version);
+  // Pending state is invisible until its recording transaction is committed.
+  assert.equal(viewed.state.moves, 1);
+  assert.equal(viewed.version, session.results[0].version);
 });
 
 test('bounded pending work returns overload without invalidating a live session', async t => {

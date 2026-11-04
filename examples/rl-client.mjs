@@ -1,5 +1,6 @@
 // Dependency-free CPU environment demo. Replace chooseAction with your policy.
 import { DEFAULT_NUM_ENVS, MAX_ENVS } from '../server/rl/protocol.mjs';
+import { randomUUID } from 'node:crypto';
 
 const options = { url: process.env.BLOCK_BLAST_URL || 'http://127.0.0.1:5173', envs: DEFAULT_NUM_ENVS, batches: 200, seed: 123, 'delay-ms': 0, mask: 'true' };
 for (let i = 2; i < process.argv.length; i += 2) {
@@ -16,11 +17,24 @@ for (const [key, min, max] of [['envs', 1, MAX_ENVS], ['batches', 1, 1_000_000],
 }
 const base = options.url.replace(/\/$/, '');
 async function request(path, body, method = body === undefined ? 'GET' : 'POST') {
-  const response = await fetch(base + path, {
-    method, signal: AbortSignal.timeout(30_000),
-    ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  });
-  const text = await response.text();
+  // Allocate once, before sending. A network retry must keep both this key and
+  // the original version/actions instead of accidentally executing another step.
+  const payload = method === 'POST' ? { ...body, requestId: body?.requestId ?? randomUUID() } : body;
+  const encoded = payload === undefined ? undefined : JSON.stringify(payload);
+  let response, text;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      response = await fetch(base + path, {
+        method, signal: AbortSignal.timeout(30_000),
+        ...(encoded === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: encoded }),
+      });
+      text = await response.text();
+      break;
+    } catch (error) {
+      if (method !== 'POST' || attempt >= 2) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) throw new Error(`${response.status} ${data?.error?.code || ''}: ${data?.error?.message || text}`);
   return data;
@@ -39,11 +53,14 @@ process.on('SIGINT', () => { stop = true; });
 process.on('SIGTERM', () => { stop = true; });
 try {
   let batch = await request('/api/rl/sessions', { numEnvs: options.envs, seed: options.seed, maxEpisodeSteps: 10_000,
-    invalidActionMode: useMask ? 'reject' : 'transition' });
+    invalidActionMode: useMask ? 'reject' : 'transition',
+    policyMetadata: { name: 'random-demo', version: '1', experimentTags: [useMask ? 'masked' : 'unmasked'] } });
   sessionId = batch.sessionId;
   const path = `/api/rl/sessions/${sessionId}`;
   console.log(JSON.stringify({ sessionId, envs: batch.numEnvs, mask: useMask, invalidActionMode: batch.invalidActionMode,
-    viewer: `${base}/game/index.html?session=${sessionId}&env=0` }));
+    gameId: batch.results[0].gameId,
+    viewer: `${base}/game/index.html?session=${sessionId}&env=0`,
+    history: `${base}/api/rl/history/sessions/${sessionId}/games` }));
   let attempts = 0, successfulPlacements = 0, invalidActions = 0, reward = 0, episodes = 0;
   const start = performance.now();
   for (let i = 0; i < options.batches && !stop; i++) {

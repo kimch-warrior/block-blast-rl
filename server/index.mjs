@@ -8,6 +8,9 @@ import { createSqliteStore } from './sqlite-store.mjs';
 import { openapi } from './openapi.mjs';
 import { createRlPool } from './rl/pool.mjs';
 import { DEFAULT_WORKER_COUNT, MAX_ENVS } from './rl/protocol.mjs';
+import { createHistoryStore } from './rl/history-store.mjs';
+import { createHistoryApi } from './rl/history-http.mjs';
+import { createReplayService } from './rl/replay-service.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OWNER = 'local-player';
@@ -55,14 +58,26 @@ function inside(directory, target) {
   return !isAbsolute(path) && path !== '..' && !path.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`);
 }
 
-export function createApplication({dataDir, store: providedStore, gameDirectory=resolve(root,'public/game'), rlOptions={}}={}) {
-  const rl = createRlPool({
-    workerCount: Number(process.env.RL_WORKERS ?? DEFAULT_WORKER_COUNT),
-    maxEnvs: Number(process.env.RL_MAX_ENVS ?? MAX_ENVS),
-    maxPending: Number(process.env.RL_MAX_PENDING ?? 16),
-    ...rlOptions,
-  });
+export function createApplication({dataDir, store: providedStore, historyStore: providedHistory, gameDirectory=resolve(root,'public/game'), rlOptions={}}={}) {
   const store = providedStore || createSqliteStore(dataDir);
+  const recordsDir = resolve(dataDir ?? process.env.DATA_DIR ?? 'data', 'records');
+  let history, rl, replay;
+  try {
+    history = providedHistory || createHistoryStore(recordsDir);
+    rl = createRlPool({
+      workerCount: Number(process.env.RL_WORKERS ?? DEFAULT_WORKER_COUNT),
+      maxEnvs: Number(process.env.RL_MAX_ENVS ?? MAX_ENVS),
+      maxPending: Number(process.env.RL_MAX_PENDING ?? 16),
+      ...rlOptions,
+      historyStore: history,
+    });
+    replay = createReplayService(recordsDir);
+  } catch (error) {
+    history?.close();
+    store.close();
+    throw error;
+  }
+  const historyApi = createHistoryApi({ history, rl, replay });
   const games = createGameService(store);
   const server = createServer(async (request,response) => {
     try {
@@ -74,11 +89,14 @@ export function createApplication({dataDir, store: providedStore, gameDirectory=
       if (pathname === '/healthz') {
         method(request,'GET');
         let ok = false;
-        try { ok = store.health(); } catch { /* Readiness is false while SQLite is unavailable. */ }
+        try { ok = store.health() && history.health() && !rl.stats().recordingError; } catch { /* Readiness includes durable play records. */ }
         return json(response,ok?200:503,{ok,service:'block-blast',storage:'sqlite'});
       }
       if (pathname === '/api/openapi.json') {
         method(request,'GET'); return json(response,200,openapi);
+      }
+      if (pathname.startsWith('/api/rl/history/')) {
+        return json(response,200,await historyApi.handle(request,url,pathname));
       }
       if (pathname === '/api/rl/stats') {
         method(request,'GET'); return json(response,200,await rl.stats());
@@ -163,12 +181,19 @@ export function createApplication({dataDir, store: providedStore, gameDirectory=
   });
   server.requestTimeout=30_000;
   server.headersTimeout=15_000;
-  return { server, store, rl, async close() {
-    // Terminate workers first so pending training requests fail promptly during shutdown.
-    await rl.close();
-    try {
-      if (server.listening) await new Promise((done,reject)=>server.close(error=>error?reject(error):done()));
-    } finally { store.close(); }
+  let closing;
+  return { server, store, rl, history, async close() {
+    if (closing) return closing;
+    closing = (async () => {
+      let failure;
+      for (const finish of [() => rl.close(), () => replay.close(), async () => {
+        if (server.listening) await new Promise((done,reject)=>server.close(error=>error?reject(error):done()));
+      }, () => history.close(), () => store.close()]) {
+        try { await finish(); } catch (error) { failure ??= error; }
+      }
+      if (failure) throw failure;
+    })();
+    return closing;
   } };
 }
 
@@ -182,7 +207,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
   let closing=false;
   for (const signal of ['SIGINT','SIGTERM']) process.on(signal,()=>{
     if (closing) return; closing=true;
-    const timer=setTimeout(()=>process.exit(1),10_000);timer.unref();
+    const timer=setTimeout(()=>process.exit(1),40_000);timer.unref();
     app.close().then(()=>{clearTimeout(timer);process.exitCode=0;}).catch(error=>{console.error(error.message);process.exitCode=1;});
   });
 }

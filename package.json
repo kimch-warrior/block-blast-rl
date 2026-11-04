@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node server/index.mjs",
     "dev": "node --watch server/index.mjs",
-    "test": "node --test tests/engine.test.mjs tests/api.test.mjs tests/api-node.test.mjs tests/score-storage.test.mjs tests/rl-pool.test.mjs tests/rl-http.test.mjs tests/frontend-client.test.mjs tests/frontend-controller.test.mjs tests/frontend-input.test.mjs",
+    "test": "node --test tests/*.test.mjs",
     "rl:demo": "node examples/rl-client.mjs",
     "rl:benchmark": "node scripts/benchmark-rl.mjs",
     "docker:up": "docker compose up --build -d",

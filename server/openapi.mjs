@@ -31,7 +31,7 @@ const command = (summary, extra, required=[]) => ({ summary, parameters: [id],
 });
 
 export const openapi = {
-  openapi:'3.1.0', info:{title:'Block Blast Local Game API',version:'1.2.0',
+  openapi:'3.1.0', info:{title:'Block Blast Local Game API',version:'1.3.0',
     description:'Shared local game API. No sign-in or API key is required. Browser and container clients using the same game ID share SQLite-backed state. Intended for the local Docker network. This API does not access the original Android game. Indexes are zero-based.'},
   servers:[{url:'/'}],
   paths:{
@@ -47,7 +47,7 @@ export const openapi = {
     '/api/shapes':{get:{summary:'Read all 51 ordinary block shapes',responses:{200:{description:'Shape catalogue'}}}},
   },
   components:{schemas:{...rlSchemas,State:state,Snapshot:{type:'object',required:['id','version','state','gameOver','canUndo','legalMoves'],properties:{
-    id:{type:'string'},version,state:{$ref:'#/components/schemas/State'},gameOver:{type:'boolean'},canUndo:{type:'boolean'},
+    id:{type:'string'},gameId:{type:'string',format:'uuid',description:'RL snapshots only: permanent game identity, replaced on reset. Use with sessionId for history, rather than the reusable id.'},sessionId:{type:'string',format:'uuid'},envId:{type:'integer',minimum:0,maximum:511},episodeId:{type:'integer',minimum:0},version,state:{$ref:'#/components/schemas/State'},gameOver:{type:'boolean'},canUndo:{type:'boolean'},
     legalMoves:{type:'array',items:{type:'object',properties:{slot:{type:'integer'},id:{type:'integer'},positions:{type:'array',items:{type:'object',properties:{row:{type:'integer'},col:{type:'integer'}}}}}}},
     lastMove:{type:['object','null'],properties:{slot:{type:'integer'},row:{type:'integer'},col:{type:'integer'},points:{type:'integer'},clearedRows:{type:'array',items:{type:'integer'}},clearedCols:{type:'array',items:{type:'integer'}},refilled:{type:'boolean'},clearScreen:{type:'boolean'},clearScreenBonus:{type:'integer'},scoreBreakdown:{type:'object',required:['placement','elimination','allClear'],properties:{placement:{type:'integer'},elimination:{type:'integer'},allClear:{type:'integer'}}}}},updatedAt:{type:'string',format:'date-time'},
   }},Error:{type:'object',required:['error'],description:'409 and 422 may also include the latest snapshot at the top level.',properties:{error:{type:'object',required:['code','message'],properties:{code:{type:'string'},message:{type:'string'}}}}}}},
